@@ -1,0 +1,5 @@
+[clickhouse]
+178.62.227.82 ansible_become_pass=revyqyxitxok ansible_user=user
+
+[runner]
+localhost

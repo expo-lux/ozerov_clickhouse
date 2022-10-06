@@ -1,0 +1,48 @@
+- name: Prepare
+  hosts: all, !runner
+  become: True
+  gather_subset: min
+    
+  tasks:
+    - name: initial
+      include_role:
+        name: initial
+
+- name: install Clickhouse
+  hosts: clickhouse
+  become: True
+  gather_facts: no
+
+  tasks:
+
+    - name: get my public ip
+      uri: 
+        url: http://icanhazip.com
+        return_content: yes
+      delegate_to: "{{ groups['runner'][0] }}"
+      register: my_ip
+
+    - set_fact: public_ip="{{ my_ip['content'] | trim }}"
+
+    - name: block 9000 port for all
+      iptables:
+        action: append
+        chain: INPUT
+        in_interface: eth0
+        protocol: tcp
+        destination_port: "9000"
+        jump: DROP
+
+    - name: allow 9000 port for my public IP
+      iptables:
+        action: insert
+        source: "{{ public_ip }}"
+        chain: INPUT
+        in_interface: eth0
+        protocol: tcp
+        destination_port: "9000"
+        jump: ACCEPT
+
+    - name: install Clickhouse
+      include_role:
+        name: clickhouse
