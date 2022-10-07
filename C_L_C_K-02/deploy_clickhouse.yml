@@ -1,0 +1,66 @@
+- name: Prepare
+  hosts: all, !runner
+  become: True
+  gather_subset: min
+    
+  tasks:
+    - name: initial
+      include_role:
+        name: initial
+
+- name: install Clickhouse
+  hosts: clickhouse
+  become: True
+  gather_facts: no
+
+  tasks:
+
+    - name: get my public ip
+      uri: 
+        url: http://icanhazip.com
+        return_content: yes
+      delegate_to: "{{ groups['runner'][0] }}"
+      register: my_ip
+
+    - set_fact: public_ip="{{ my_ip['content'] | trim }}"
+
+    - name: block 9000 port for all
+      iptables:
+        action: append
+        chain: INPUT
+        in_interface: eth0
+        protocol: tcp
+        destination_port: "9000"
+        jump: DROP
+
+    - name: allow 9000 port for my public IP
+      iptables:
+        action: insert
+        source: "{{ public_ip }}"
+        chain: INPUT
+        in_interface: eth0
+        protocol: tcp
+        destination_port: "9000"
+        jump: ACCEPT
+
+    - name: 1. install Clickhouse
+      include_role:
+        name: clickhouse
+
+    - name: 2. copy config
+      copy:
+        dest: /etc/clickhouse-server/config.d/main.xml
+        src:  main.xml
+
+    - name: 3. restart service 
+      ansible.builtin.systemd:
+        state: restarted
+        daemon_reload: yes
+        name: clickhouse-server
+
+    - name: 3. get response
+      uri:
+        url: http://localhost:8125
+        return_content: true
+      register: response
+      failed_when: response['content'] != "You reached CH http port"

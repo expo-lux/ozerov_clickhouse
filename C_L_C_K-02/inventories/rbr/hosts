@@ -1,0 +1,5 @@
+[clickhouse]
+188.166.23.106 ansible_become_pass=cenuobesdhfm ansible_user=user
+
+[runner]
+localhost
