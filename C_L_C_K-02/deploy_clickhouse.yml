@@ -16,10 +16,11 @@
   tasks:
 
     - name: get my public ip
+      become: False
       uri: 
         url: http://icanhazip.com
         return_content: yes
-      delegate_to: "{{ groups['runner'][0] }}"
+      delegate_to: localhost
       register: my_ip
 
     - set_fact: public_ip="{{ my_ip['content'] | trim }}"
@@ -57,6 +58,12 @@
         state: restarted
         daemon_reload: yes
         name: clickhouse-server
+
+    - name: 3. Wait for Clickhouse Server to Become Ready (check http 8125 port)
+      wait_for:
+        port: "8125"
+        delay: "1"
+        timeout: "30"
 
     - name: 3. get response
       uri:

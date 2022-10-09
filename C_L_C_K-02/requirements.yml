@@ -1,7 +1,13 @@
-- name: clickhouse
-  src: https://github.com/AlexeySetevoi/ansible-clickhouse.git
-  version: "1.13"
+---
+roles:
+  - name: clickhouse
+    src: https://github.com/AlexeySetevoi/ansible-clickhouse.git
+    version: "1.13"
 
-- name: initial
-  src: https://github.com/expo-lux/ansible_initial.git
-  version: "0.1.1"
+  - name: initial
+    src: https://github.com/expo-lux/ansible_initial.git
+    version: "0.1.1"
+
+collections:
+  - name: community.general
+    version: "5.7.0"
