@@ -1,0 +1,114 @@
+---
+- name: Python3 install
+  hosts: all, !runner
+  become: True
+  gather_facts: no
+    
+  tasks:
+    - name: initial
+      raw: test -e /usr/bin/python3 || ( test -e /usr/bin/yum && yum -y install python3 || apt -y install python3 )
+
+- name: Prepare
+  hosts: all, !runner
+  become: True
+  gather_subset: min
+    
+  tasks:
+    - name: initial
+      include_role:
+        name: initial
+
+- name: install Clickhouse
+  hosts: clickhouse
+  become: True
+  gather_facts: no
+
+  tasks:
+
+    - name: get my public ip
+      become: False
+      uri: 
+        url: http://icanhazip.com
+        return_content: yes
+      delegate_to: localhost
+      register: my_ip
+
+    - set_fact: public_ip="{{ my_ip['content'] | trim }}"
+
+    - name: block 9000 port for all
+      iptables:
+        action: append
+        chain: INPUT
+        in_interface: eth0
+        protocol: tcp
+        destination_port: "9000"
+        jump: DROP
+
+    - name: allow 9000 port for my public IP
+      iptables:
+        action: insert
+        source: "{{ public_ip }}"
+        chain: INPUT
+        in_interface: eth0
+        protocol: tcp
+        destination_port: "9000"
+        jump: ACCEPT
+
+    - name: 1. Install Clickhouse
+      include_role:
+        name: clickhouse
+
+    - name: 2. delete /etc/clickhouse-server/config.d/config.xml
+      file:
+        path: /etc/clickhouse-server/config.d/config.xml
+        state: absent
+
+    - name: 3. Set loglevel to 'information'
+      community.general.xml:
+        path: /etc/clickhouse-server/config.xml
+        xpath: /clickhouse/logger/level
+        value: information
+
+    - name: 4. Set logsize to '3000M'
+      community.general.xml:
+        path: /etc/clickhouse-server/config.xml
+        xpath: /clickhouse/logger/size
+        value: 3000M
+
+    - name: 6.1 Set query_log params
+      community.general.xml:
+        path: /etc/clickhouse-server/config.xml
+        xpath: /clickhouse/query_log/database
+        value: system
+
+    - name: 6.2 Set query_log params
+      community.general.xml:
+        path: /etc/clickhouse-server/config.xml
+        xpath: /clickhouse/query_log/table
+        value: queries
+    
+    - name: 6.3 restart service 
+      ansible.builtin.systemd:
+        state: restarted
+        daemon_reload: yes
+        name: clickhouse-server
+
+    - name: 6.4. Wait for Clickhouse Server to Become Ready (check http 8123 port)
+      wait_for:
+        port: "8123"
+        delay: "2"
+        timeout: "30"
+
+    - name: 6.5 make query
+      ansible.builtin.shell: clickhouse-client --multiquery --query="set log_queries=1;set log_query_threads=1; select 5;"
+
+    - name: 6.6. Delay 2sec
+      wait_for:
+        port: "8123"
+        delay: "2"
+        timeout: "30"
+
+    - name: 6.7 test system.queries for existence 
+      ansible.builtin.shell: clickhouse-client --multiquery --query="select count(*) from system.queries where query='select 5;'"
+      register: cnt
+      failed_when: (cnt.stdout | int) < 1

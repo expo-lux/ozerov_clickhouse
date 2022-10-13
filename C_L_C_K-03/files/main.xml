@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <timezone>UTC</timezone>
+    <http_port>8125</http_port>
+    <max_connections>100</max_connections>
+    <http_server_default_response>You reached CH http port</http_server_default_response>
+</clickhouse>

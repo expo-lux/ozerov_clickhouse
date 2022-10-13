@@ -1,0 +1,2 @@
+[clickhouse]
+146.190.238.135 ansible_become_pass=zbdowoygcdbm ansible_user=user
