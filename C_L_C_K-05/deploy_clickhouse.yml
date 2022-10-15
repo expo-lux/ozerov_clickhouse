@@ -62,8 +62,38 @@
       file:
         path: /etc/clickhouse-server/users.d/users.xml
         state: absent
+    
+    - name: 3. Get count of 'ronly' profile
+      community.general.xml:
+        path: /etc/clickhouse-server/users.xml
+        xpath: /clickhouse/profiles/ronly
+        count: true
+      register: profile_hits
 
-    - name: 3. Create profile ronly
+    - name: 4. Add ronly profile
+      block: 
+        - community.general.xml:
+            path: /etc/clickhouse-server/users.xml
+            xpath: /clickhouse/profiles
+            pretty_print: yes
+            backup: yes
+            add_children:
+              - ronly:
+                  _:
+                    - readonly: "1"
+                    - max_execution_time: "180"
+      when: profile_hits.count < 1
+
+    - name: 4. Set ronly profile
+      community.general.xml:
+        path: /etc/clickhouse-server/users.xml
+        xpath: /clickhouse/profiles
+        pretty_print: yes
+        backup: yes
+        set_children:
+          - readonly: "1"
+          - max_execution_time: "180"
+      when: profile_hits.count == 1
 
     - name: 6. Get count of 'ch_user' user
       community.general.xml:
@@ -83,8 +113,8 @@
               - ch_user:
                   _:
                     - password: ch_password
-                    - profile: ronly
                     - access_management: "0"
+                    - profile: ronly
                     - networks:
                         _:
                           - ip: 127.0.0.1/32
@@ -100,6 +130,7 @@
         set_children:
           - password: ch_password
           - access_management: "0"
+          - profile: ronly
           - networks:
               _:
                 - ip: 127.0.0.1/32
@@ -110,5 +141,7 @@
       pause:
         seconds: 5
 
-    - name: Execute query with ch_user credentials
-      ansible.builtin.shell: clickhouse-client -u ch_user --password ch_password --query="select 5;"
+    - name: Test ch_user
+      ansible.builtin.shell: clickhouse-client -u ch_user --password ch_password --multiquery  --query="set max_result_rows=1; select 5;"
+      register: result
+      failed_when: '"Cannot modify \''max_result_rows\'' setting in readonly mode" not in result.stderr'
