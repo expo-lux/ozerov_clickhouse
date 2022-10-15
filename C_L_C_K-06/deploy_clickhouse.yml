@@ -1,0 +1,173 @@
+---
+- name: Python3 install
+  hosts: all, !runner
+  become: True
+  gather_facts: no
+    
+  tasks:
+    - name: initial
+      raw: user -e /usr/bin/python3 || ( user -e /usr/bin/yum && yum -y install python3 || apt -y install python3 )
+
+- name: Prepare
+  hosts: all, !runner
+  become: True
+  gather_subset: min
+    
+  tasks:
+    - name: initial
+      include_role:
+        name: initial
+
+- name: install Clickhouse
+  hosts: clickhouse
+  become: True
+  gather_facts: no
+
+  tasks:
+
+    - name: get my public ip
+      become: False
+      uri: 
+        url: http://icanhazip.com
+        return_content: yes
+      delegate_to: localhost
+      register: my_ip
+
+    - set_fact: public_ip="{{ my_ip['content'] | trim }}"
+
+    - name: block 9000 port for all
+      iptables:
+        action: append
+        chain: INPUT
+        in_interface: eth0
+        protocol: tcp
+        destination_port: "9000"
+        jump: DROP
+
+    - name: allow 9000 port for my public IP
+      iptables:
+        action: insert
+        source: "{{ public_ip }}"
+        chain: INPUT
+        in_interface: eth0
+        protocol: tcp
+        destination_port: "9000"
+        jump: ACCEPT
+
+    - name: 1. Install Clickhouse
+      include_role:
+        name: clickhouse
+
+    - name: 2. delete /etc/clickhouse-server/users.d/users.xml
+      file:
+        path: /etc/clickhouse-server/users.d/users.xml
+        state: absent
+
+    - name: 2. Allow access_management to default user
+      community.general.xml:
+        path: /etc/clickhouse-server/users.xml
+        xpath: /clickhouse/users/default/access_management
+        value: "1"
+    
+    - name: 3. Get count of 'user' quota
+      community.general.xml:
+        path: /etc/clickhouse-server/users.xml
+        xpath: /clickhouse/quotas/user
+        count: true
+      register: quota_hits
+
+    - name: 3. Add user quota
+      block: 
+        - community.general.xml:
+            path: /etc/clickhouse-server/users.xml
+            xpath: /clickhouse/quotas
+            pretty_print: yes
+            backup: yes
+            add_children:
+              - user:
+                  _:
+                    - interval:
+                        _:
+                          - duration: "3600"
+                          - queries: "100"
+                          - read_rows: "10000000"
+                          - errors: "0"
+                          - result_rows: "0"
+                          - execution_time: "0"
+      when: quota_hits.count < 1
+
+    - name: 3. Set user quota
+      community.general.xml:
+        path: /etc/clickhouse-server/users.xml
+        xpath: /clickhouse/quotas/user/interval
+        pretty_print: yes
+        backup: yes
+        set_children:
+          - duration: "3600"
+          - queries: "100"
+          - read_rows: "10000000"
+          - errors: "0"
+          - result_rows: "0"
+          - execution_time: "0"
+      when: quota_hits.count == 1
+
+    - name: 9. Get count of 'ch_user' user
+      community.general.xml:
+        path: /etc/clickhouse-server/users.xml
+        xpath: /clickhouse/users/ch_user
+        count: true
+      register: hits
+
+    - name: 9. Add ch_user
+      block: 
+        - community.general.xml:
+            path: /etc/clickhouse-server/users.xml
+            xpath: /clickhouse/users
+            pretty_print: yes
+            backup: yes
+            add_children:
+              - ch_user:
+                  _:
+                    - password: ch_password
+                    - access_management: "0"
+                    - quota: user
+                    - networks:
+                        _:
+                          - ip: 127.0.0.1/32
+                          - ip: "{{ public_ip }}"
+      when: hits.count < 1
+
+    - name: 9. Set ch_user
+      community.general.xml:
+        path: /etc/clickhouse-server/users.xml
+        xpath: /clickhouse/users/ch_user
+        pretty_print: yes
+        backup: yes
+        set_children:
+          - password: ch_password
+          - access_management: "0"
+          - quota: user
+          - networks:
+              _:
+                - ip: 127.0.0.1/32
+                - ip: "{{ public_ip }}"
+      when: hits.count == 1
+
+    - name: Restart service 
+      ansible.builtin.systemd:
+        state: restarted
+        daemon_reload: yes
+        name: clickhouse-server
+
+    - name: Wait for config reread
+      pause:
+        seconds: 5
+
+    - name: Send 100 requests
+      ansible.builtin.shell: clickhouse-client -u ch_user --password ch_password --query="select * from system.databases;"
+      loop: "{{ range(100) | list }}"
+
+    - name: Test for exception
+      ansible.builtin.shell: clickhouse-client -u ch_user --password ch_password --query="select * from system.databases;"
+      register: result
+      failed_when: '"DB::Exception: Quota for user" not in result.stderr'

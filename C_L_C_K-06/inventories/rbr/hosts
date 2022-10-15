@@ -1,0 +1,2 @@
+[clickhouse]
+159.65.193.220  ansible_become_pass=menwistskumq ansible_user=user
