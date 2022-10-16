@@ -1,0 +1,2 @@
+[clickhouse]
+167.99.34.216  ansible_become_pass=hwjvetyipirj ansible_user=user

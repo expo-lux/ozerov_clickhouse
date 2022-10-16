@@ -1,0 +1,21 @@
+clickhouse_path_configdir: "/etc/clickhouse-server"
+clickhouse_listen_host:
+  - "0.0.0.0"
+clickhouse_version: "22.9.3.18"
+clickhouse_https_port: 8443
+clickhouse_tcp_secure_port: 9440
+clickhouse_ssl_server:
+  certificate_file: "/etc/clickhouse-server/server.crt"
+  private_key_file: "/etc/clickhouse-server/server.key"
+  dh_params_file: "/etc/clickhouse-server/dhparam.pem"
+  verification_mode: "none"
+  load_default_ca_file: "true"
+  cache_sessions: "true"
+  disable_protocols: "sslv2,sslv3"
+  prefer_server_ciphers: "true"
+clickhouse_ssl_client:
+  invalid_certificate_handler_name: AcceptCertificateHandler
+  load_default_ca_file: "true"
+  cache_sessions: "true"
+  disable_protocols: "sslv2,sslv3"
+  prefer_server_ciphers: "true"
