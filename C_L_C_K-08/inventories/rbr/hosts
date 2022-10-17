@@ -1,0 +1,2 @@
+[clickhouse]
+167.71.6.105  ansible_become_pass=prohdvcfplgn ansible_user=user

@@ -1,0 +1,74 @@
+---
+- name: Python3 install
+  hosts: all, !runner
+  become: True
+  gather_facts: no
+    
+  tasks:
+    - name: initial
+      raw: user -e /usr/bin/python3 || ( user -e /usr/bin/yum && yum -y install python3 || apt -y install python3 )
+
+- name: Prepare
+  hosts: all, !runner
+  become: True
+  gather_subset: min
+    
+  tasks:
+    - name: initial
+      include_role:
+        name: initial
+
+- name: install Clickhouse
+  hosts: clickhouse
+  become: True
+  gather_facts: no
+
+  tasks:
+
+    - name: get my public ip
+      become: False
+      uri: 
+        url: http://icanhazip.com
+        return_content: yes
+      delegate_to: localhost
+      register: my_ip
+
+    - set_fact: public_ip="{{ my_ip['content'] | trim }}"
+
+    - name: block 9000 port for all
+      iptables:
+        action: append
+        chain: INPUT
+        in_interface: eth0
+        protocol: tcp
+        destination_port: "9000"
+        jump: DROP
+
+    - name: allow 9000 port for my public IP
+      iptables:
+        action: insert
+        source: "{{ public_ip }}"
+        chain: INPUT
+        in_interface: eth0
+        protocol: tcp
+        destination_port: "9000"
+        jump: ACCEPT
+ 
+    - name: 1. Install Clickhouse
+      include_role:
+        name: clickhouse
+
+    - name: 1. Copy config.xml
+      copy: 
+        remote_src: True 
+        src:  "{{ clickhouse_path_configdir }}/config.d/config.xml"
+        dest: "{{ clickhouse_path_configdir }}/config.xml"
+      
+    - name: 1. Remove old config.xml
+      file: 
+        path: "{{ clickhouse_path_configdir }}/config.d/config.xml"
+        state: absent
+
+    - name: 5. Test metrics page
+      ansible.builtin.uri:
+        url: http://localhost:9363/metrics
