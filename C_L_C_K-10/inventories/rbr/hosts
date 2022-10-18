@@ -1,0 +1,7 @@
+[clickhouse]
+
+[zookeeper]
+178.62.215.46 ansible_become_pass=jikaeedidvwo ansible_user=user id=1  
+
+[java]
+178.62.215.46 ansible_become_pass=jikaeedidvwo ansible_user=user
