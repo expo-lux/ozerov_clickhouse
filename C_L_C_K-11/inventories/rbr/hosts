@@ -1,0 +1,9 @@
+[clickhouse]
+178.62.253.130 ansible_become_pass=svpirbxirbpy ansible_user=user
+178.62.234.65 ansible_become_pass=yxzfurtwuvce ansible_user=user
+
+[zookeeper]
+178.62.253.130 ansible_become_pass=svpirbxirbpy ansible_user=user id=1  
+
+[java]
+178.62.253.130 ansible_become_pass=svpirbxirbpy ansible_user=user

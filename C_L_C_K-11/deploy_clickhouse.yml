@@ -1,0 +1,184 @@
+---
+- name: install python3
+  hosts: all, !runner
+  become: True
+  gather_facts: no
+    
+  tasks:
+    - name: initial
+      raw: user -e /usr/bin/python3 || ( user -e /usr/bin/yum && yum -y install python3 || apt -y install python3 )
+
+- name: initial config
+  hosts: all, !runner
+  become: True
+  gather_subset:
+    - min
+    - all_ipv4_addresses
+    
+  tasks:
+    - name: initial
+      include_role:
+        name: initial
+
+- name: install Java
+  hosts: java
+  become: True
+  gather_facts: no
+
+  tasks:
+    - name: install java
+      include_role: 
+        name: java
+
+- name: install Zookeeper
+  hosts: zookeeper
+  become: True
+  gather_facts: no
+
+  tasks:        
+    - name: 1. Install Zookeeper on first node
+      include_role:
+        name: zookeeper        
+
+- name: install Clickhouse
+  hosts: clickhouse
+  become: True
+  gather_facts: no
+
+  tasks:
+
+    - name: Allow access to clickhouse port 9000 only for my public port
+      block: 
+        - uri: 
+            url: http://icanhazip.com
+            return_content: yes
+          delegate_to: localhost
+          register: my_ip
+          become: False
+
+        - set_fact: public_ip="{{ my_ip['content'] | trim }}"
+
+        - name: block 9000 port for source IP on WAN interface
+          iptables:
+            action: append
+            chain: INPUT
+            in_interface: eth0
+            protocol: tcp
+            destination_port: "9000"
+            jump: DROP
+
+        - name: allow 9000 port for my public IP on WAN interface
+          iptables:
+            action: insert
+            source: "{{ public_ip }}"
+            chain: INPUT
+            in_interface: eth0
+            protocol: tcp
+            destination_port: "9000"
+            jump: ACCEPT
+
+    - name: 0. Build /etc/hosts file for clickhouse nodes
+      lineinfile: 
+        dest: /etc/hosts 
+        regexp: '.*{{ item }}$'
+        line: "{{ hostvars[item].ansible_facts.eth1.ipv4.address }} {{ hostvars[item].ansible_fqdn }}"
+        state: present
+      when: hostvars[item].ansible_default_ipv4.address is defined
+      loop: "{{ groups['clickhouse'] }}"
+
+    - name: 0. Install Clickhouse
+      block:
+
+        - name: 0. Install Clickhouse
+          include_role:
+            name: clickhouse
+
+        - name: 0. Copy config.xml
+          copy: 
+            remote_src: True 
+            src:  "{{ clickhouse_path_configdir }}/config.d/config.xml"
+            dest: "{{ clickhouse_path_configdir }}/config.xml"
+          
+        - name: 0. Remove old config.xml
+          file: 
+            path: "{{ clickhouse_path_configdir }}/config.d/config.xml"
+            state: absent
+
+        - name: 0. Remove users.xml in users.d
+          file:
+            path: "{{  clickhouse_path_configdir }}/users.d/users.xml"
+            state: absent
+
+    - name: 2,3. Set helper variables
+      set_fact:
+          ch0_eth1: "{{ hostvars[groups['clickhouse'][0]]['ansible_facts']['eth1']['ipv4']['address'] }}"
+          ch1_eth1: "{{ hostvars[groups['clickhouse'][1]]['ansible_facts']['eth1']['ipv4']['address'] }}"
+      tags: debug
+
+    - name: 2,3. Generate/etc/clickhouse-server/cluster.xml config
+      template:
+        src: remote_servers.j2
+        dest: "{{ clickhouse_path_configdir }}/cluster.xml"
+        owner: "{{ clickhouse_user | default('clickhouse') }}"
+        group: "{{ clickhouse_group | default('clickhouse') }}"
+        mode: "ug=rw,o-rwx"
+      become: true
+      vars:
+        clickhouse_clusters:
+          local:
+            shard_1:
+                - { host: "{{ ch0_eth1 }}", port: 9000 }
+                - { host: "{{ ch1_eth1 }}", port: 9000 }
+        clickhouse_zookeeper_nodes:
+          - host: "{{ ch0_eth1 }}"
+            port: 2181
+        clickhouse_macros:
+          cluster: local
+          shard: 01
+          replica: "{{ hostvars[inventory_hostname]['ansible_facts']['eth1']['ipv4']['address'] }}"
+    
+    - name: 2,3. Include /etc/clickhouse-server/cluster.xml in /etc/clickhouse-server/config.xml (include_from tag)
+      community.general.xml:
+        path: /etc/clickhouse-server/config.xml
+        xpath: /clickhouse/include_from
+        pretty_print: yes
+        backup: yes
+        value: /etc/clickhouse-server/cluster.xml
+
+    - name: 4. Restart clickhouse-server service 
+      ansible.builtin.systemd:
+        state: restarted
+        daemon_reload: yes
+        name: clickhouse-server
+
+    - name: 4. Wait for Clickhouse Server to Become Ready (check http 8123 port)
+      wait_for:
+        port: "8123"
+        delay: "1"
+        timeout: "30"
+
+    - name: 5. Copy queries.sql
+      copy:
+        dest: /opt
+        src:  queries.sql
+
+    - name: 5. Create tables ch_local, ch_distributed
+      ansible.builtin.shell: clickhouse-client --queries-file /opt/queries.sql
+
+    - name: 5. Generate test data
+      ansible.builtin.shell: "(for i in `seq 5`;do  echo $i,title,description,{{ inventory_hostname }},1999-01-01; done) > /opt/data.csv"
+
+    - name: 6. Insert test data on first node
+      ansible.builtin.shell: "clickhouse-client --multiquery --query 'TRUNCATE TABLE ch_replicated_local; INSERT INTO ch_replicated_local FORMAT CSV' < /opt/data.csv"
+      when: inventory_hostname == groups['clickhouse'][0]
+
+    - name: 6. Count records on second node
+      ansible.builtin.shell: "clickhouse-client --query 'select count(*) from default.ch_replicated_local'"
+      register: cnt
+      failed_when: (cnt.stdout | int) != 5
+      when: inventory_hostname == groups['clickhouse'][1]
+
+    - name: 6. Count records in distributed table
+      ansible.builtin.shell: "clickhouse-client --query 'select count(*) from default.ch_replicated_distributed'"
+      register: cnt
+      failed_when: (cnt.stdout | int) != 5
