@@ -1,0 +1,6 @@
+[clickhouse]
+206.189.8.145 ansible_become_pass=oqblirgqakqw ansible_user=user
+
+[zookeeper] 
+
+[java]

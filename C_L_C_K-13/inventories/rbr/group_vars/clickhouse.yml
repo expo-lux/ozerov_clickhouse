@@ -1,0 +1,12 @@
+clickhouse_config_dictionaries_lazy_load: False
+clickhouse_path_configdir: "/etc/clickhouse-server"
+clickhouse_listen_host:
+  - "0.0.0.0"
+clickhouse_version: "22.9.3.18"
+clickhouse_prometheus:
+  - endpoint: /metrics
+    port: 9363
+    metrics: "true"
+    events: "true"
+    asynchronous_metrics: "false"
+  
