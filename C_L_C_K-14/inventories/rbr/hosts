@@ -1,0 +1,6 @@
+[clickhouse]
+167.71.67.96 ansible_become_pass=eknkgcjgnmdx ansible_user=user
+
+[zookeeper] 
+
+[java]
